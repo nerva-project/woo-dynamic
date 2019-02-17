@@ -42,6 +42,8 @@ class Nerva_Gateway extends WC_Payment_Gateway
 	/** @var bool  */
 	private $mempool_tx_found = false;
 	
+	private $totalPayedAmount;
+	
 	
 
     function __construct()
@@ -346,6 +348,7 @@ class Nerva_Gateway extends WC_Payment_Gateway
 		$payment_id = $this->get_paymentid_cookie($order_id);
 		$currency = $order->get_currency();
 		$amount_xnv2 = $this->changeto( $amount, $currency, $payment_id, $order_id);
+		$amount_xnv2=round($amount_xnv2,1);
 		$address = $this->address;
 		
 		$order->update_meta_data( "Payment ID", $payment_id);
@@ -355,10 +358,11 @@ class Nerva_Gateway extends WC_Payment_Gateway
 		$displayedPaymentAddress = null;
 		$displayedPaymentId = null;
 		$displayedDarkTheme = $this->darkTheme === 'yes';
+		
 	
 		if($amount_xnv2 !== null){
             //TODO: QR codes need to be tested. Commenting this out will hide the QR code box until we know they are working
-			//$qrUri = "nerva:$address?tx_payment_id=$payment_id";
+			$qrUri = "nerva:$address?tx_payment_id=$payment_id";
 			
 			if($this->non_rpc){
 				$displayedPaymentAddress = $address;
@@ -395,6 +399,7 @@ class Nerva_Gateway extends WC_Payment_Gateway
 		$displayedMaxConfirmation = (int)$this->confirmations_wait;
 	
 		$transactionConfirmed = $this->confirmed;
+		$paid=$this->totalPayedAmount;
 		$pluginIdentifier = 'nerva_gateway';
 		if(!$ajax){
 			$ajaxurl = admin_url('admin-ajax.php');
@@ -407,7 +412,8 @@ class Nerva_Gateway extends WC_Payment_Gateway
 				'maxConfirmation'=>$displayedMaxConfirmation,
 				'paymentAddress'=>$displayedPaymentAddress,
 				'paymentId'=>$displayedPaymentId,
-				'amount'=>$amount_xnv2
+				'amount'=>$amount_xnv2,
+				'paid'=>$paid
 			));
 		}
     }
@@ -610,7 +616,12 @@ class Nerva_Gateway extends WC_Payment_Gateway
 			while($output_counter < $outputs_count){
 				$totalPayed += $get_payments_method["payments"][$output_counter]["amount"];
 				$output_counter++;
+				
 			}
+			//added
+			$this->totalPayedAmount=$totalPayed/1000000000000;
+
+				
 			if($totalPayed >= $amount_atomic_units){
 				$tx_height = $get_payments_method["payments"][$outputs_count-1]["block_height"];
 				$get_height = $this->nerva_daemon->getheight();
