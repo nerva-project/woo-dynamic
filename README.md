@@ -1,78 +1,67 @@
-# MasariWP
-A WooCommerce extension for accepting Masari currency
+## 1: Activating the plugin
 
-## Dependencies
-This plugin is rather simple but there are a few things that need to be set up before hand.
+* Put the plugin in the correct directory: You will need to put the folder named `nerva` from this repo/unzipped release into the wordpress plugins directory. This can be found at `path/to/wordpress/folder/wp-content/plugins`
 
-* A web server! Ideally with the most recent versions of PHP and mysql
+* Activate the plugin from the WordPress admin panel: Once you login to the admin panel in WordPress, click on "Installed Plugins" under "Plugins". Then simply click "Activate" where it says "Nerva - WooCommerce Gateway"
 
-* A Masari wallet. You can find the official wallet [here](https://github.com/masari-project/masari)
+At this point you will be able to see the gateway setting page and there will be a message at the top saying `[ERROR] Failed to connect to nerva-wallet-rpc at localhost port`. This means the payment gateway cannot contact the nerva rpc wallet and we will configure this in the next step.
 
-* [WordPress](https://wordpress.org)
-Wordpress is the backend tool that is needed to use WooCommerce and this Masari plugin
+## 2: Configuring your wallet backend
 
-* [WooCommerce](https://woocommerce.com)
-This Masari plugin is an extension of WooCommerce, which works with WordPress
+In order for the plugin to detect when payments have been made, you must run an instance of nerva-wallet-rpc on your server, connected to the wallet your store will be receiving payments to. There are a couple of different options in setting this up with varying levels of security. we will discuss these and the potential ramifications of each decision.
 
-## Step 1: Activating the plugin
-* Downloading: First of all, you will need to download the plugin. You can download the latest source code from GitHub. This can be done with the command `git clone https://github.com/masari-project/masariwp.git`
+### 2a: Setting up the wallet
 
-* Put the plugin in the correct directory: You will need to put the folder named `masari` from this repo/unzipped release into the wordpress plugins directory. This can be found at `path/to/wordpress/folder/wp-content/plugins`
+The recommended method to setting up a wallet is to create a view-only wallet. This type of wallet allows you to see payments that are coming into the wallet, but you cannot spend funds from the wallet. In the situation of a store accepting Nerva as a payment, this is the preferred and most secure method.
 
-* Activate the plugin from the WordPress admin panel: Once you login to the admin panel in WordPress, click on "Installed Plugins" under "Plugins". Then simply click "Activate" where it says "Masari - WooCommerce Gateway"
+To create a view-only wallet you first create a regular wallet with nerva-wallet-cli. The process is not discussed here as it is fairly rudimentary to anyone who has used nerva before. Once that wallet is created, we need to obtain the address and private view key to create the view-only wallet. once we have these we run  
+`nerva-wallet-cli --generate-from-view-key <wallet-name>`  
+where `<wallet-name>` is the name you want to give to your wallet. You will be prompted to enter the address and private view key for this new wallet, along with a password. Once done, the wallet will act in the same way as a regular wallet for receiving payments, but you will not be able to transfer funds out of the wallet.
 
-## Step 2 Option 1: Use your wallet address and viewkey
+NOTE: View-only wallet will only show the total amount of payments received into the wallet. They do not count of consider outgoing transactions. Therefore, the balance reflected by a view-only wallet will only be correct if it is used to only receive payments. This may not be desirable or possible in all situations.
 
-* Get your Masari wallet address starting with '5'
-* Get your wallet secret viewkey from your wallet
+NOTE: Be sure to backup the wallet you have created. A good backup includes all information. Address, mnemonic seed, and wallet keys. You can get all this information from the wallet with the commands  
+`address`  
+`seed`  
+`viewkey`  
+`spendkey`  
+And entering the wallet password when prompted.
 
-A note on privacy: When you validate transactions with your private viewkey, your viewkey is sent to (but not stored on) msrchain.net over HTTPS. This could potentally allow an attacker to see your incoming, but not outgoing, transactions if he were to get his hands on your viewkey. Even if this were to happen, your funds would still be safe and it would be impossible for somebody to steal your money. For maximum privacy use your own masari-wallet-rpc instance.
+### 2b: Using the wallet
 
-## Step 2 Option 2: Get a masari daemon to connect to
+Now that we have the wallet created we can open it with nerva-wallet-rpc to start listening for incoming transactions. There are 2 ways to do this. Firstly is to start nervad and sync the blockchain. This is the preferred method as then you alone control all of the nerva systems required to receive payments. The other option is to use a public node. There are 2 considerations when using a public node. Firstly, there is some compromise in privacy. for example, a node operator can see the IP addresses of people making connections to their node. The primary consideration however is uptime. There is no guarantee a public node will be available at all times. It you lose connection to a public node, you will not be able to see incoming payments, which will cause disruption to customers and inconvenience to you. 
 
-### Running a full node
+When you have decided which option you would like to use, simply start nerva-wallet-rpc with the appropriate flags
 
-To do this: start the masari daemon on your server and leave it running in the background. This can be accomplished by running `./masarid` inside your masari downloads folder. The first time that you start your node, the masari daemon will download and sync the entire masari blockchain. This can take several hours and is best done on a machine with at least 4GB of ram, an SSD hard drive (with at least 5GB of free space), and a high speed internet connection.
+To start the wallet connecting to your own local node, you can use the following command  
+`nerva-wallet-rpc --disable-rpc-login --rpc-bind-port <bind-port> --wallet-file <wallet-file-path> --prompt-for-password`  
+where `<bind-port>` can be any valid port number, just so long as it matches what is set in the WooCommerce plugin. `<wallet-file-path>` is the path to the wallet file.  
 
-### Setup your  masari wallet-rpc
+The `--prompt-for-password` option will instruct the RPC wallet to ask you for your wallet password rather than setting it on the command line. If you were to use the `--password` flag instead, it could result in the cleartext password being stored on the system, such as in the .bash-history file on linux. This presents a major security concern, especially if using a regular wallet as opposed to a view-only wallet. 
 
-* Setup a masari wallet using the masari-wallet-cli tool. If you do not know how to do this you can learn about it at [getmasari.org](https://getmasari.org)
+If you decide to use a public node, the command is similar, with the inclusion of an additional flag to supply the node to connect to  
+`nerva-wallet-rpc --disable-rpc-login --rpc-bind-port <bind-port> --daemon-address xnv.pubnodes.com --wallet-file <wallet-file-path> --prompt-for-password`
 
-* [Create a view-only wallet from that wallet for security.](https://monero.stackexchange.com/questions/3178/how-to-create-a-view-only-wallet-for-the-gui/4582#4582)
+This will allow the RPC wallet to connect to the Nerva public node hosted at [pubnodes.com](https://www.pubnodes.com)
 
-* Start the Wallet RPC and leave it running in the background. This can be accomplished by running `./masari-wallet-rpc --rpc-bind-port 38082 --disable-rpc-login --log-level 2 --wallet-file /path/viewOnlyWalletFile` where "/path/viewOnlyWalletFile" is the wallet file for your view-only wallet.
+Now that you have the wallet started up, you are ready to set up the store and begin accepting payments in XNV.
 
-## Step 4: Setup Masari Gateway in WooCommerce
+## Step 4: Setup Nerva Gateway in WooCommerce
 
 * Navigate to the "settings" panel in the WooCommerce widget in the WordPress admin panel.
 
 * Click on "Checkout"
 
-* Select "Masari GateWay"
+* Select "Nerva GateWay"
 
 * Check the box labeled "Enable this payment gateway"
 
-* Check either "Use ViewKey" or "Use masari-wallet-rpc"
+* Enter your nerva wallet address in the box labled "Nerva Address". If you do not know your address, you can run the `address` commmand in your nerva wallet
 
-If You chose to use viewkey:
+* Enter the IP address of your server in the box labeled "Nerva wallet rpc Host/IP".
 
-* Enter your masari wallet address in the box labled "Masari Address". If you do not know your address, you can run the `address` commmand in your masari wallet
-
-* Enter your secret viewkey in the box labeled "ViewKey"
-
-If you chose to use masari-wallet-rpc:
-
-* Enter your masari wallet address in the box labled "Masari Address". If you do not know your address, you can run the `address` commmand in your masari wallet
-
-* Enter the IP address of your server in the box labeled "Masari wallet rpc Host/IP"
-
-* Enter the port number of the Wallet RPC in the box labeled "Masari wallet rpc port" (it would be `38082` if you used the above example).
+* Enter the port number of the Wallet RPC in the box labeled "Nerva wallet rpc port"
 
 Finally:
 
 * Click on "Save changes"
-
-## Donating to the Devs :)
-MSR Address: `5iKvFxieyiYfo5yLMwsrXqByn2fb1upm77MTpiyQNpxqjEJWzVrfpDCDpZCNZ48f9xYZM2mG5GrfzP5UCt6bkVwn1xhjERf` (cryptochangements)
-
-XMR Address : `44krVcL6TPkANjpFwS2GWvg1kJhTrN7y9heVeQiDJ3rP8iGbCd5GeA4f3c2NKYHC1R4mCgnW7dsUUUae2m9GiNBGT4T8s2X` (serhack)
