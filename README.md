@@ -46,7 +46,7 @@ This will allow the RPC wallet to connect to the Nerva public node hosted at [pu
 
 Now that you have the wallet started up, you are ready to set up the store and begin accepting payments in XNV.
 
-## Step 4: Setup Nerva Gateway in WooCommerce
+## Step 3: Setup Nerva Gateway in WooCommerce
 
 * Navigate to the "settings" panel in the WooCommerce widget in the WordPress admin panel.
 
