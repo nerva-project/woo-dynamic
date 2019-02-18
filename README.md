@@ -1,3 +1,7 @@
+# Woo-Dynamic
+
+Woo-Dynamic is a WooCommerce plugin for stores that wish to accept XNV as an additional payment option. This is one of a pair of WooCommerce plugins, the other being Woo-Static. The main differentiator is that Woo-Dynamic is designed to convert fiat values into an equivalent XNV value based on the current market price. Woo-Static is designed to have a fixed conversion rate which is specified in the plugin settings.
+
 ## 1: Activating the plugin
 
 * Put the plugin in the correct directory: You will need to put the folder named `nerva` from this repo/unzipped release into the wordpress plugins directory. This can be found at `path/to/wordpress/folder/wp-content/plugins`

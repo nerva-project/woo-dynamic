@@ -1,9 +1,9 @@
 <?php
 /*
-Plugin Name: NERVA - WooCommerce Gateway
+Plugin Name: NERVA-Dynamic - WooCommerce XNV Gateway
 Plugin URI: https://getnerva.org
-Description: Extends WooCommerce by Adding the NERVA Gateway
-Version: 2.0
+Description: WooCommerce plugin for XNV as a payment option. Converts fiat prices to XNV automatically based on market value
+Version: 1.0
 Author: NERVA Project
 Author URI: https://getnerva.org
 */
