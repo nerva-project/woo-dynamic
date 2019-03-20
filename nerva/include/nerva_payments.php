@@ -5,16 +5,17 @@
  * Authors: Serhack, cryptochangements and gnock
  * Modified to work with Nerva
  */
-
-
 class Nerva_Gateway extends WC_Payment_Gateway
 {
     private $reloadTime = 10000;
     private $discount;
     private $confirmed = false;
     private $nerva_daemon;
+    private $non_rpc = false;
     private $confirmations = 0;
     private $confirmations_wait;
+    private $xnv_tools;
+    private $testnet = false;
 	
 	private $version;
 	/** @var WC_Logger  */
@@ -26,12 +27,15 @@ class Nerva_Gateway extends WC_Payment_Gateway
 	/** @var string|null  */
 	private $address;
 	/** @var string|null  */
-	private $accept_zero_conf;
+    private $viewKey;
+    /** @var bool  */
+	private $use_viewKey;
 	/** @var bool  */
-	private $zero_confirm;
-	/** @var string  */
+	private $use_rpc;
 	/** @var bool  */
-	private $mempool_tx_found = false;
+    private $mempool_tx_found = false;
+    /** @var bool  */
+    private $use_testnet;
 	
 	private $totalPayedAmount;
 	
@@ -54,12 +58,25 @@ class Nerva_Gateway extends WC_Payment_Gateway
         $this->host = $this->get_option('daemon_host');
         $this->port = $this->get_option('daemon_port');
         $this->address = $this->get_option('nerva_address');
+        $this->viewKey = $this->get_option('viewKey');
         $this->discount = $this->get_option('discount');
         $this->confirmations_wait = $this->get_option('confs');
+        $this->use_testnet = $this->get_option('environment');
         
-        if($this->confirmations_wait == 0)
+        $this->use_viewKey = $this->get_option('use_viewKey');
+        $this->use_rpc = $this->get_option('use_rpc');
+        
+        if($this->use_viewKey == 'yes')
         {
-            $this->zero_confirm = true;
+            $this->non_rpc = true;
+        }
+        if($this->use_rpc == 'yes')
+        {
+            $this->non_rpc = false;
+        }
+        if ($this->use_testnet == 'yes')
+        {
+            $this->testnet = true;
         }
         // After init_settings() is called, you can get the settings and load them into variables, e.g:
         // $this->title = $this->get_option('title' );
@@ -80,6 +97,7 @@ class Nerva_Gateway extends WC_Payment_Gateway
         }
 		
         $this->nerva_daemon = new Nerva_Library($this->host, $this->port);
+        $this->xnv_tools = new XnvNodeTools();
     }
     
     public static function install(){
@@ -121,6 +139,26 @@ class Nerva_Gateway extends WC_Payment_Gateway
                 'desc_tip' => __('Payment description the customer will see during the checkout process.', 'nerva_gateway'),
                 'default' => __('Pay securely using XNV.', 'nerva_gateway')
             ),
+			'use_viewKey' => array(
+                'title' => __('Use ViewKey', 'nerva_gateway'),
+                'label' => __(' Verify Transaction with ViewKey ', 'nerva_gateway'),
+                'type' => 'checkbox',
+                'description' => __('Fill in the Address and ViewKey fields to verify transactions with your ViewKey', 'nerva_gateway'),
+                'default' => 'no'
+            ),
+			'use_rpc' => array(
+                'title' => __('Use nerva-wallet-rpc', 'nerva_gateway'),
+                'label' => __(' Verify transactions with the nerva-wallet-rpc ', 'nerva_gateway'),
+                'type' => 'checkbox',
+                'description' => __('This must be setup seperatly', 'nerva_gateway'),
+                'default' => 'no'
+            ),
+            'viewKey' => array(
+                'title' => __('Secret ViewKey', 'nerva_gateway'),
+                'label' => __('Secret ViewKey'),
+                'type' => 'text',
+                'desc_tip' => __('Your secret ViewKey', 'nerva_gateway')
+            ),
             'nerva_address' => array(
                 'title' => __('Nerva Address', 'nerva_gateway'),
                 'label' => __('Useful for people that have not a daemon online'),
@@ -148,6 +186,13 @@ class Nerva_Gateway extends WC_Payment_Gateway
                 'default' => '5'
 
             ),
+            'environment' => array(
+                'title' => __(' Testnet', 'nerva_gateway'),
+                'label' => __(' Check this if you are using testnet ', 'nerva_gateway'),
+                'type' => 'checkbox',
+                'description' => __('Check this box if you are using testnet', 'nerva_gateway'),
+                'default' => 'no'
+            ),
             'confs' => array(
                 'title' => __(' Confirmations to wait for', 'nerva_gateway'),
                 'type' => 'number',
@@ -171,6 +216,7 @@ class Nerva_Gateway extends WC_Payment_Gateway
         echo "<p>Welcome to Nerva Extension for WooCommerce. Getting started: Make a connection with daemon";
         echo "<div style='border:1px solid #DDD;padding:5px 10px;font-weight:bold;color:#223079;background-color:#9ddff3;'>";
         
+        if(!$this->non_rpc) // only try to get balance data if using wallet-rpc
         $this->getamountinfo();
         
         echo "</div>";
@@ -225,6 +271,14 @@ class Nerva_Gateway extends WC_Payment_Gateway
         if ($this->check_nerva() != TRUE) {
             echo "<div class=\"error\"><p>Your Nerva Address doesn't look valid. Have you checked it?</p></div>";
         }
+        if(!$this->check_viewKey())
+        {
+            echo "<div class=\"error\"><p>Your ViewKey doesn't look valid. Have you checked it?</p></div>";
+        }
+        if($this->check_checkedBoxes())
+        {
+            echo "<div class=\"error\"><p>You must choose to either use nerva-wallet-rpc or a ViewKey, not both</p></div>";
+        }
     }
 
     // Validate fields
@@ -234,6 +288,26 @@ class Nerva_Gateway extends WC_Payment_Gateway
         $nerva_address = $this->settings['nerva_address'];
         if (strlen($nerva_address) == 97) {
             return true;
+        }
+        return false;
+    }
+    public function check_viewKey()
+    {
+        if($this->use_viewKey == 'yes')
+        {
+            if (strlen($this->viewKey) == 64) {
+                return true;
+            }
+            return false;
+        }
+        return true;
+    }
+    public function check_checkedBoxes()
+    {
+        if($this->use_viewKey == 'yes'){
+            if($this->use_rpc == 'yes'){
+                return true;
+            }
         }
         return false;
     }
@@ -274,19 +348,26 @@ class Nerva_Gateway extends WC_Payment_Gateway
             //TODO: QR codes need to be tested. Commenting this out will hide the QR code box until we know they are working
 			$qrUri = "nerva:$address?tx_payment_id=$payment_id";
 			
-			$array_integrated_address = $this->nerva_daemon->make_integrated_address($payment_id);
-			if(!isset($array_integrated_address)){
-				$this->log->add('Nerva_Gateway', '[ERROR] Unable get integrated address');
-				// Seems that we can't connect with daemon, then set array_integrated_address, little hack
-				$array_integrated_address["integrated_address"] = $address;
-					
+			if($this->non_rpc){
 				$displayedPaymentAddress = $address;
 				$displayedPaymentId = $payment_id;
+				
+				$this->verify_non_rpc($payment_id, $amount_xnv2, $order_id);
 			}else{
-				$displayedPaymentAddress = $array_integrated_address["integrated_address"];
-				$displayedPaymentId = null;
+				$array_integrated_address = $this->nerva_daemon->make_integrated_address($payment_id);
+				if(!isset($array_integrated_address)){
+					$this->log->add('Nerva_Gateway', '[ERROR] Unable get integrated address');
+					// Seems that we can't connect with daemon, then set array_integrated_address, little hack
+					$array_integrated_address["integrated_address"] = $address;
+					
+					$displayedPaymentAddress = $address;
+					$displayedPaymentId = $payment_id;
+				}else{
+					$displayedPaymentAddress = $array_integrated_address["integrated_address"];
+					$displayedPaymentId = null;
+				}
+				$this->verify_payment($payment_id, $amount_xnv2, $order);
 			}
-			$this->verify_payment($payment_id, $amount_xnv2, $order);
 		}
 		
 		$displayedCurrentConfirmation = null;
@@ -331,7 +412,8 @@ class Nerva_Gateway extends WC_Payment_Gateway
     	if(count($stored_rate) > 0){
 			return $stored_rate[0]->payment_id;
 		}else{
-			$payment_id = bin2hex(openssl_random_pseudo_bytes(8));
+			$size = $this->non_rpc ? 32 : 8;
+			$payment_id = bin2hex(openssl_random_pseudo_bytes($size));
 			return $payment_id;
 		}
     }
@@ -519,7 +601,6 @@ class Nerva_Gateway extends WC_Payment_Gateway
 			//added
 			$this->totalPayedAmount=$totalPayed/1000000000000;
 
-				
 			if($totalPayed >= $amount_atomic_units){
 				$tx_height = $get_payments_method["payments"][$outputs_count-1]["block_height"];
 				$get_height = $this->nerva_daemon->getheight();
@@ -546,7 +627,37 @@ class Nerva_Gateway extends WC_Payment_Gateway
             return $difference;
         }
     }
+    public function verify_non_rpc($payment_id, $amount, $order_id)
+    {
+        //todo: need to wait for the required number of confirmations
+        $bc_height = $this->xnv_tools->get_last_block_height($this->testnet);
 
+        $block_difference = $this->last_block_seen($bc_height);
+        $tx_count = 0;
+        $tx_hashes = array();
+
+        for ($i = 0; $i <= $block_difference; $i++) {
+            $tx_hashes_blk = $this->xnv_tools->get_tx_hashes_from_block($bc_height - $i, $this->testnet);
+            if (isset($tx_hashes_blk)) {
+                $tx_hashes = array_merge($tx_hashes, $tx_hashes_blk);
+                $tx_count += count($tx_hashes_blk);
+            }
+        }
+
+        if ($tx_count > 0) {
+            $decoded_outs = $this->xnv_tools->check_txs($tx_hashes, $this->address, $this->viewKey, $this->testnet);
+            $amount_atomic_units = $amount * 1000000000000;
+            foreach($decoded_outs as $o) {
+                if ($o['payment_id'] == $payment_id && $o['amount'] >= $amount_atomic_units) {
+                    $this->on_verified($payment_id, $amount_atomic_units, $order_id);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+    
     public function do_ssl_check()
     {
         if ($this->enabled == "yes" && !$this->get_option('onion_service')) {

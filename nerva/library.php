@@ -238,6 +238,13 @@ class Nerva_Library
         return $get_transfers;
     }
 
+    public function view_key()
+    {
+        $query_key = array('key_type' => 'view_key');
+        $query_key_method = $this->_run('query_key', $query_key);
+        return $query_key_method;
+    }
+
     public function make_integrated_address($payment_id)
     {
         $integrate_address_parameters = array('payment_id' => $payment_id);
@@ -308,5 +315,81 @@ class Nerva_Library
         else
 			return $response["pool"];
     }
+}
     
+class XnvNodeTools
+{
+    public function get_api_url($testnet)
+    {
+        if ($testnet)
+            return "https://xnv5.getnerva.org/api/"; //xnv5 only
+        else
+            return "https://xnv2.getnerva.org/api/"; //xnv1-xnv3
+    }
+
+    public function get_last_block_height($testnet)
+    {
+        $curl = curl_init();
+
+        $url = $this->get_api_url($testnet);
+        
+        curl_setopt_array($curl, array(
+                                       CURLOPT_RETURNTRANSFER => 1,
+                                       CURLOPT_URL => $url . "getblockcount.php",
+                                       ));
+        $resp = curl_exec($curl);
+        curl_close($curl);
+        
+        $array = json_decode($resp, true);
+        return $array['result']['count'] - 1;
+    }
+    
+    public function get_tx_hashes_from_block($height, $testnet)
+    {
+        $curl = curl_init();
+
+        $url = $this->get_api_url($testnet);
+        
+        curl_setopt_array($curl, array(
+                                       CURLOPT_RETURNTRANSFER => 1,
+                                       CURLOPT_URL => $url . "getblockbyheight.php?height=" . $height,
+                                       ));
+        $resp = curl_exec($curl);
+        curl_close($curl);
+        
+        $array = json_decode($resp, true);
+        
+        if (!isset($array['result']['tx_hashes'])){
+            return null;
+        }
+
+        $tx_hashes = $array['result']['tx_hashes'];
+
+        if (count($tx_hashes) > 0) {
+            return $tx_hashes;
+        }
+        else {
+            return null;
+        }
+    }
+    
+    public function check_txs($tx_hash, $address, $view_key, $testnet)
+    {
+        $url = $this->get_api_url($testnet);
+        
+        $hash_string = "?";
+        foreach($tx_hash as $th) {
+            $hash_string .= "hash[]=" . $th . "&";
+        }
+
+        $curl = curl_init();
+        curl_setopt_array($curl, array(
+                                       CURLOPT_RETURNTRANSFER => 1,
+                                       CURLOPT_URL => $url . "decodeoutputs.php" . $hash_string . "address=" . $address . "&viewkey=" . $view_key,
+                                       ));
+        $resp = curl_exec($curl);
+        curl_close($curl);
+        $array = json_decode($resp, true);
+        return $array['result']['decoded_outs'];
+    }
 }
