@@ -374,8 +374,8 @@ class Nerva_Gateway extends WC_Payment_Gateway
 		if($this->mempool_tx_found)
 			$displayedCurrentConfirmation = 0;
 		if($this->confirmations > 0)
-			$displayedCurrentConfirmation = $this->confirmations;
-		
+            $displayedCurrentConfirmation = $this->confirmations;
+        
 		$displayedMaxConfirmation = (int)$this->confirmations_wait;
 	
 		$transactionConfirmed = $this->confirmed;
@@ -613,6 +613,7 @@ class Nerva_Gateway extends WC_Payment_Gateway
 			}
         }
     }
+
     public function last_block_seen($height) // sometimes 2 blocks are mined within a few seconds of eacher. Make sure we don't miss one
     {
         if (!isset($_COOKIE['last_seen_block']))
@@ -627,30 +628,30 @@ class Nerva_Gateway extends WC_Payment_Gateway
             return $difference;
         }
     }
+
     public function verify_non_rpc($payment_id, $amount, $order_id)
     {
-        //todo: need to wait for the required number of confirmations
         $bc_height = $this->xnv_tools->get_last_block_height($this->testnet);
 
-        $block_difference = $this->last_block_seen($bc_height);
-        $tx_count = 0;
-        $tx_hashes = array();
+        $block_difference = $this->last_block_seen($bc_height) + ($this->confirmations_wait + 2);
 
         for ($i = 0; $i <= $block_difference; $i++) {
             $tx_hashes_blk = $this->xnv_tools->get_tx_hashes_from_block($bc_height - $i, $this->testnet);
             if (isset($tx_hashes_blk)) {
-                $tx_hashes = array_merge($tx_hashes, $tx_hashes_blk);
-                $tx_count += count($tx_hashes_blk);
-            }
-        }
-
-        if ($tx_count > 0) {
-            $decoded_outs = $this->xnv_tools->check_txs($tx_hashes, $this->address, $this->viewKey, $this->testnet);
-            $amount_atomic_units = $amount * 1000000000000;
-            foreach($decoded_outs as $o) {
-                if ($o['payment_id'] == $payment_id && $o['amount'] >= $amount_atomic_units) {
-                    $this->on_verified($payment_id, $amount_atomic_units, $order_id);
-                    return true;
+                if (count($tx_hashes_blk) > 0) {
+                    $decoded_outs = $this->xnv_tools->check_txs($tx_hashes_blk, $this->address, $this->viewKey, $this->testnet);
+                    $amount_atomic_units = $amount * 1000000000000;
+                    foreach($decoded_outs as $o) {
+                        if ($o['payment_id'] == $payment_id && $o['amount'] >= $amount_atomic_units) {
+                            $this->confirmations = $i;
+                            $totalPayed = $o['amount'];
+                            $this->totalPayedAmount = $totalPayed/1000000000000;
+                            if($this->confirmations >= $this->confirmations_wait) {
+                                $this->on_verified($payment_id, $amount_atomic_units, $order_id);
+                                return true;
+                            }
+                        }
+                    }
                 }
             }
         }
