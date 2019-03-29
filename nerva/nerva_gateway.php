@@ -40,7 +40,7 @@ function nerva_add_my_currency_symbol($currency_symbol, $currency)
 
 function nerva_scripts(){
 	wp_enqueue_style('materials_icons', 'https://fonts.googleapis.com/icon?family=Material+Icons');
-	wp_enqueue_style('montserrat_font', 'http://fonts.googleapis.com/css?family=Lato:400,700');
+	wp_enqueue_style('montserrat_font', 'https://fonts.googleapis.com/css?family=Lato:400,700');
 	wp_enqueue_style('nerva_gateway-style',  plugin_dir_url( __FILE__ ).'assets/style.css');
 }
 
