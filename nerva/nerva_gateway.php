@@ -89,7 +89,6 @@ function nerva_create_menu()
         '',
         plugins_url('nerva/assets/png-nerva-logo-16x16.png'),
         56 // Position on menu, woocommerce has 55.5, products has 55.6
-
     );
 }
 

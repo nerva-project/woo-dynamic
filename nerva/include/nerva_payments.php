@@ -346,28 +346,35 @@ class Nerva_Gateway extends WC_Payment_Gateway
 		
 		if($amount_xnv2 !== null){
             //TODO: QR codes need to be tested. Commenting this out will hide the QR code box until we know they are working
-			$qrUri = "nerva:$address?tx_payment_id=$payment_id";
-			
-			if($this->non_rpc){
-				$displayedPaymentAddress = $address;
-				$displayedPaymentId = $payment_id;
-				
-				$this->verify_non_rpc($payment_id, $amount_xnv2, $order_id);
-			}else{
-				$array_integrated_address = $this->nerva_daemon->make_integrated_address($payment_id);
-				if(!isset($array_integrated_address)){
-					$this->log->add('Nerva_Gateway', '[ERROR] Unable get integrated address');
-					// Seems that we can't connect with daemon, then set array_integrated_address, little hack
-					$array_integrated_address["integrated_address"] = $address;
-					
-					$displayedPaymentAddress = $address;
-					$displayedPaymentId = $payment_id;
-				}else{
-					$displayedPaymentAddress = $array_integrated_address["integrated_address"];
-					$displayedPaymentId = null;
-				}
-				$this->verify_payment($payment_id, $amount_xnv2, $order);
-			}
+            $qrUri = "nerva:$address?tx_payment_id=$payment_id";
+            
+            $array_integrated_address = null;
+
+            if($this->non_rpc){
+                if (!isset($payment_id)) {
+                    $payment_id = random_bytes(8);
+                }
+                $array_integrated_address = $this->nerva_daemon->make_integrated_address_non_rpc($address, $payment_id);
+            } else {
+                $array_integrated_address = $this->nerva_daemon->make_integrated_address($payment_id);
+            }
+
+            if(!isset($array_integrated_address)){
+                $this->log->add('Nerva_Gateway', '[ERROR] Unable get integrated address');
+                $array_integrated_address["integrated_address"] = $address;
+                
+                $displayedPaymentAddress = $address;
+                $displayedPaymentId = $payment_id;
+            }else{
+                $displayedPaymentAddress = $array_integrated_address["integrated_address"];
+                $displayedPaymentId = null;
+            }
+
+            if($this->non_rpc){
+                $this->verify_non_rpc($payment_id, $amount_xnv2, $order_id);
+            } else {
+                $this->verify_payment($payment_id, $amount_xnv2, $order);
+            }
 		}
 		
 		$displayedCurrentConfirmation = null;
@@ -412,8 +419,7 @@ class Nerva_Gateway extends WC_Payment_Gateway
     	if(count($stored_rate) > 0){
 			return $stored_rate[0]->payment_id;
 		}else{
-			$size = $this->non_rpc ? 32 : 8;
-			$payment_id = bin2hex(openssl_random_pseudo_bytes($size));
+			$payment_id = bin2hex(openssl_random_pseudo_bytes(8));
 			return $payment_id;
 		}
     }
@@ -558,34 +564,7 @@ class Nerva_Gateway extends WC_Payment_Gateway
     
     public function verify_payment($payment_id, $amount, $order_id)
     {
-        /*
-         * function for verifying payments
-         * Check if a payment has been made with this payment id then notify the merchant
-         */
-        
-        $pool_txs = $this->nerva_daemon->get_transfers_in_mempool();
-        $this->mempool_tx_found = false;
-        $i = 1;
-        $correct_tx;
-        while($i <= count($pool_txs))
-        {
-           if($pool_txs[$i-1]["payment_id"] == $payment_id)
-           {
-               $this->mempool_tx_found = true;
-               $tx_index = $i - 1;
-           }
-           $i++;
-        }
-        
         $amount_atomic_units = $amount * 1000000000000;
-        
-        if($this->confirmations_wait == 0)
-        {
-            if($pool_txs[$tx_index]["amount"] >= $amount_atomic_units)
-            {
-               $this->on_verified($payment_id, $amount_atomic_units, $order_id);
-            }
-        }
         
         $get_payments_method = $this->nerva_daemon->get_payments($payment_id);
         if (isset($get_payments_method["payments"][0]["amount"])) {
@@ -665,21 +644,6 @@ class Nerva_Gateway extends WC_Payment_Gateway
             if (get_option('woocommerce_force_ssl_checkout') == "no") {
                 echo "<div class=\"error\"><p>" . sprintf(__("<strong>%s</strong> is enabled and WooCommerce is not forcing the SSL certificate on your checkout page. Please ensure that you have a valid SSL certificate and that you are <a href=\"%s\">forcing the checkout pages to be secured.</a>"), $this->method_title, admin_url('admin.php?page=wc-settings&tab=checkout')) . "</p></div>";
             }
-        }
-    }
-
-    public function connect_daemon()
-    {
-        $host = $this->settings['daemon_host'];
-        $port = $this->settings['daemon_port'];
-        $nervaLibrary = new Nerva_Library($host, $port);
-        if ($nervaLibrary->works() == true) {
-            echo "<div class=\"notice notice-success is-dismissible\"><p>Everything works! Congratulations and welcome to Nerva. <button type=\"button\" class=\"notice-dismiss\">
-						<span class=\"screen-reader-text\">Dismiss this notice.</span>
-						</button></p></div>";
-        } else {
-            $this->log->add('nerva_gateway', '[ERROR] Plugin can not reach wallet rpc.');
-            echo "<div class=\" notice notice-error\"><p>Error with connection of daemon, see documentation!</p></div>";
         }
     }
 }

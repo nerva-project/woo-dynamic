@@ -10,9 +10,17 @@
  * http://implix.com
  * Modified to work with monero-rpc wallet by Serhack and cryptochangements
  */
+
+define('CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX', 0x3800);
+define('CRYPTONOTE_PUBLIC_INTEGRATED_ADDRESS_BASE58_PREFIX', 0x7081);
+define('CRYPTONOTE_PUBLIC_SUBADDRESS_BASE58_PREFIX', 0x1080);
+
+require_once('SHA3.php');
+require_once('base58.php');
+
 class Nerva_Library
 {
-    protected $url = null, $is_debug = false, $parameters_structure = 'array';
+    protected $url = null, $parameters_structure = 'array';
     protected $curl_options = array(
         CURLOPT_CONNECTTIMEOUT => 8,
         CURLOPT_TIMEOUT => 8
@@ -36,10 +44,20 @@ class Nerva_Library
     {
         $this->validate(false === extension_loaded('curl'), 'The curl extension must be loaded to use this class!');
         $this->validate(false === extension_loaded('json'), 'The json extension must be loaded to use this class!');
+        $this->validate(false === extension_loaded('bcmath'), 'The bcmath extension must be loaded to use this class!');
         
         $this->host = $pHost;
         $this->port = $pPort;
         $this->url = $pHost . ':' . $pPort . '/json_rpc';
+
+        $this->base58 = new Monero_base58();
+    }
+
+    public function keccak_256($message)
+    {
+        $keccak256 = SHA3::init (SHA3::KECCAK_256);
+        $keccak256->absorb (hex2bin($message));
+        return bin2hex ($keccak256->squeeze (32)) ;
     }
 
     public function validate($pFailed, $pErrMsg)
@@ -47,12 +65,6 @@ class Nerva_Library
         if ($pFailed) {
             echo $pErrMsg;
         }
-    }
-
-    public function setDebug($pIsDebug)
-    {
-        $this->is_debug = !empty($pIsDebug);
-        return $this;
     }
 
     public function setCurlOptions($pOptionsArray)
@@ -90,23 +102,11 @@ class Nerva_Library
         $requestId++;
         // check if given params are correct
         $this->validate(false === is_scalar($pMethod), 'Method name has no scalar value');
-        // $this->validate(false === is_array($pParams), 'Params must be given as array');
-        // send params as an object or an array
-        //$pParams = ($this->parameters_structure == 'object') ? $pParams[0] : array_values($pParams);
-        // Request (method invocation)
         $request = json_encode(array('jsonrpc' => '2.0', 'method' => $pMethod, 'params' => $pParams, 'id' => $requestId));
-        // if is_debug mode is true then add url and request to is_debug
-        $this->debug('Url: ' . $this->url . "\r\n", false);
-        $this->debug('Request: ' . $request . "\r\n", false);
         $responseMessage = $this->getResponse($request);
-        // if is_debug mode is true then add response to is_debug and display it
-        $this->debug('Response: ' . $responseMessage . "\r\n", true);
-        // decode and create array ( can be object, just set to false )
         $responseDecoded = json_decode($responseMessage, true);
-        // check if decoding json generated any errors
         $jsonErrorMsg = $this->getJsonLastErrorMsg();
         $this->validate(!is_null($jsonErrorMsg), $jsonErrorMsg . ': ' . $responseMessage);
-        // check if response is correct
         $this->validate(empty($responseDecoded['id']), 'Invalid response data structure: ' . $responseMessage);
         $this->validate($responseDecoded['id'] != $requestId, 'Request id: ' . $requestId . ' is different from Response id: ' . $responseDecoded['id']);
         if (isset($responseDecoded['error'])) {
@@ -118,30 +118,6 @@ class Nerva_Library
             $this->validate(!is_null($responseDecoded['error']), $errorMessage);
         }
         return $responseDecoded['result'];
-    }
-
-    protected function debug($pAdd, $pShow = false)
-    {
-        static $debug, $startTime;
-        // is_debug off return
-        if (false === $this->is_debug) {
-            return;
-        }
-        // add
-        $debug .= $pAdd;
-        // get starttime
-        $startTime = empty($startTime) ? array_sum(explode(' ', microtime())) : $startTime;
-        if (true === $pShow and !empty($debug)) {
-            // get endtime
-            $endTime = array_sum(explode(' ', microtime()));
-            // performance summary
-            $debug .= 'Request time: ' . round($endTime - $startTime, 3) . ' s Memory usage: ' . round(memory_get_usage() / 1024) . " kb\r\n";
-            echo nl2br($debug);
-            // send output immediately
-            flush();
-            // clean static
-            $debug = $startTime = null;
-        }
     }
 
     protected function & getResponse(&$pRequest)
@@ -206,12 +182,6 @@ class Nerva_Library
         }
     }
 
-    /* 
-     * The following functions can all be called to interact with the nerva rpc wallet
-     * They will majority of them will return the result as an array
-     * Example: $daemon->address(); where $daemon is an instance of this class, will return the wallet address as string within an array
-     */
-
     public function getbalance()
     {
         $balance = $this->_run('getbalance');
@@ -247,13 +217,59 @@ class Nerva_Library
 
     public function make_integrated_address($payment_id)
     {
-        $integrate_address_parameters = array('payment_id' => $payment_id);
-        $integrate_address_method = $this->_run('make_integrated_address', $integrate_address_parameters);
-        return $integrate_address_method;
+        $params = array('payment_id' => $payment_id);
+        $res = $this->_run('make_integrated_address', $params);
+        return $res;
     }
 
-    /* A payment id can be passed as a string
-       A random payment id will be generatd if one is not given */
+    function encode_varint($data)
+    {
+        $orig = $data;
+
+        if ($data < 0x80)
+        {
+            return bin2hex(pack('C', $data));
+        }
+
+        $encodedBytes = [];
+        while ($data > 0)
+        {
+            $encodedBytes[] = 0x80 | ($data & 0x7f);
+            $data >>= 7;
+        }
+
+        $encodedBytes[count($encodedBytes)-1] &= 0x7f;
+        $bytes = call_user_func_array('pack', array_merge(array('C*'), $encodedBytes));;
+        return bin2hex($bytes);
+    }
+
+    public function decode_address($address)
+    {
+        $decoded = $this->base58->decode($address);
+
+        $prefix = $this->encode_varint(CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX);
+        $prefix_length = strlen($prefix);
+        $public_spendkey = substr($decoded, $prefix_length, 64);
+        $public_viewkey = substr($decoded, 64 + $prefix_length, 64);
+
+        return array(
+            "spendkey" => $public_spendkey,
+            "viewkey" => $public_viewkey
+        );
+    }
+
+    public function make_integrated_address_non_rpc($std_addr, $payment_id)
+    {
+        $decoded = $this->decode_address($std_addr);
+        $prefix = $this->encode_varint(CRYPTONOTE_PUBLIC_INTEGRATED_ADDRESS_BASE58_PREFIX);
+        $data = $prefix . $decoded['spendkey'] . $decoded['viewkey'] . $payment_id;
+        $hash = substr($this->keccak_256($data), 0, 8);
+
+        $res = array();
+        $res['payment_id'] = $payment_id;
+        $res['integrated_address'] = $this->base58->encode($data.$hash);
+        return $res;
+    }
 
     public function split_integrated_address($integrated_address)
     {
@@ -264,23 +280,6 @@ class Nerva_Library
             $split_methods = $this->_run('split_integrated_address', $split_params);
             return $split_methods;
         }
-    }
-
-    public function make_uri($address, $amount, $recipient_name = null, $description = null)
-    {
-        // If I pass 1, it will be 0.0000001 xnv. Then
-        $new_amount = $amount * 100000000;
-
-        $uri_params = array('address' => $address, 'amount' => $new_amount, 'payment_id' => '', 'recipient_name' => $recipient_name, 'tx_description' => $description);
-        $uri = $this->_run('make_uri', $uri_params);
-        return $uri;
-    }
-
-    public function parse_uri($uri)
-    {
-        $uri_parameters = array('uri' => $uri);
-        $parsed_uri = $this->_run('parse_uri', $uri_parameters);
-        return $parsed_uri;
     }
 
     public function transfer($amount, $address, $mixin = 4)
@@ -297,23 +296,6 @@ class Nerva_Library
         $get_payments_parameters = array('payment_id' => $payment_id);
         $get_payments = $this->_run('get_payments', $get_payments_parameters);
         return $get_payments;
-    }
-
-    public function get_bulk_payments($payment_id, $min_block_height)
-    {
-        $get_bulk_payments_parameters = array('payment_id' => $payment_id, 'min_block_height' => $min_block_height);
-        $get_bulk_payments = $this->_run('get_bulk_payments', $get_bulk_payments_parameters);
-        return $get_bulk_payments;
-    }
-
-    public function get_transfers_in_mempool()
-    {
-        $get_transfers_paramaters = array("pool" => true);
-        $response = $this->_run('get_transfers', $get_transfers_paramaters);
-        if (empty($response) || !isset($response["pool"]))
-            return;
-        else
-			return $response["pool"];
     }
 }
     
@@ -384,9 +366,8 @@ class XnvNodeTools
 
         $curl = curl_init();
         curl_setopt_array($curl, array(
-                                       CURLOPT_RETURNTRANSFER => 1,
-                                       CURLOPT_URL => $url . "decodeoutputs.php" . $hash_string . "address=" . $address . "&viewkey=" . $view_key,
-                                       ));
+            CURLOPT_RETURNTRANSFER => 1,
+            CURLOPT_URL => $url . "decodeoutputs.php" . $hash_string . "address=" . $address . "&viewkey=" . $view_key));
         $resp = curl_exec($curl);
         curl_close($curl);
         $array = json_decode($resp, true);
